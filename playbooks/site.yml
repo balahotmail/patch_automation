@@ -1,0 +1,21 @@
+---
+# playbooks/site.yml
+# Full maintenance-window sequence: stop DBs -> apply patch -> start listener.
+# Runs one host at a time by default (serial: 1) so a failure on host 2
+# doesn't leave every host in the batch down simultaneously. Override with
+# -e patch_serial=<n> or -e patch_serial=100% if you've validated the
+# patch and want to fan out faster.
+#
+# Usage:
+#   ansible-playbook playbooks/site.yml -l prod_19c_apr2026
+#   ansible-playbook playbooks/site.yml -l prod_19c_apr2026 -e patch_serial=2
+
+- name: Oracle DB patch maintenance window
+  hosts: oracle_db_hosts
+  gather_facts: true
+  serial: "{{ patch_serial | default(1) }}"
+  any_errors_fatal: true   # stop the whole run if one host fails, don't limp on
+  roles:
+    - db_stop
+    - opatch_apply
+    - listener_start

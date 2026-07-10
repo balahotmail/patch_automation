@@ -1,0 +1,179 @@
+---
+# roles/opatch_apply/tasks/main.yml
+# Stages the combo + OJVM patch and OPatch utility on the target, runs the
+# prereq check, then applies the patch. Skips work already done so the
+# role can be re-run safely (e.g. after a partial failure).
+
+- name: Ensure remote working directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ target_script_dir }}"
+    - "{{ masterlog_dir }}"
+    - "{{ patch_stage }}"
+    - "{{ backup_dir }}"
+
+- name: Check which patches are already applied in this Oracle Home
+  command: "{{ oracle_home }}/OPatch/opatch lspatches"
+  become: true
+  become_user: "{{ oracle_os_user }}"
+  register: current_patches
+  changed_when: false
+
+- name: Set fact - is the combo/DBPSU patch already applied?
+  set_fact:
+    dbpsu_already_applied: "{{ dbpsu_patch|string in current_patches.stdout }}"
+    ojvm_already_applied: "{{ ojvm_patch|string in current_patches.stdout }}"
+
+- name: Report skip if both patches are already present
+  debug:
+    msg: >
+      DBPSU {{ dbpsu_patch }} and OJVM {{ ojvm_patch }} are both already
+      applied to {{ oracle_home }} on {{ inventory_hostname }}. Skipping
+      staging and apply steps.
+  when: dbpsu_already_applied and ojvm_already_applied
+
+- name: Stage, prereq-check and apply the patch
+  when: not (dbpsu_already_applied and ojvm_already_applied)
+  block:
+
+    - name: Copy prereq-check script to target
+      copy:
+        src: opatch_prereq.sh
+        dest: "{{ target_script_dir }}/opatch_prereq.sh"
+        mode: "0755"
+
+    - name: Copy patch-apply script to target
+      copy:
+        src: opatch_apply.sh
+        dest: "{{ target_script_dir }}/opatch_apply.sh"
+        mode: "0755"
+
+    - name: Copy patch archive from patch repo to target staging dir
+      copy:
+        src: "{{ patch_repo }}/{{ patch_file }}"
+        dest: "{{ patch_stage }}/{{ patch_file }}"
+        mode: "0644"
+
+    - name: Extract the patch archive
+      unarchive:
+        src: "{{ patch_stage }}/{{ patch_file }}"
+        dest: "{{ patch_stage }}"
+        remote_src: true
+
+    - name: Copy OPatch utility archive to target staging dir
+      copy:
+        src: "{{ patch_repo }}/{{ opatch_file }}"
+        dest: "{{ patch_stage }}/{{ opatch_file }}"
+        mode: "0644"
+
+    - name: Back up existing OPatch directory
+      shell: >
+        mv {{ oracle_home }}/OPatch
+        {{ backup_dir }}/OPatch_BKP_{{ ansible_date_time.iso8601_basic_short }} || true
+
+    - name: Extract the new OPatch utility
+      unarchive:
+        src: "{{ patch_stage }}/{{ opatch_file }}"
+        dest: "{{ oracle_home }}/"
+        remote_src: true
+
+    - name: Back up Oracle inventory
+      shell: >
+        cp -rp {{ oracle_base }}/oraInventory
+        {{ backup_dir }}/oraInventory_BKP_{{ ansible_date_time.iso8601_basic_short }} || true
+
+    - name: Run prerequisite check
+      command: >
+        {{ target_script_dir }}/opatch_prereq.sh
+        {{ oh_alias }} {{ patch_stage }} {{ combo_patch }} {{ dbpsu_patch }}
+        {{ ojvm_patch }} {{ opatch_version }} {{ masterlog }} {{ target_log_dir }}
+      become: true
+      become_user: "{{ oracle_os_user }}"
+      environment:
+        EXPECTED_OS_USER: "{{ oracle_os_user }}"
+        ORACLE_PROFILE: "{{ oracle_profile }}"
+        ORAENV_PATH: "{{ oraenv_path }}"
+        NOTIFY_ENABLED: "{{ notify_enabled | string | lower }}"
+        NOTIFY_EMAIL_TO: "{{ notify_email_to }}"
+        NOTIFY_EMAIL_FROM: "{{ notify_email_from }}"
+      register: prereq_result
+      changed_when: true
+
+    - name: Show prereq output
+      debug:
+        var: prereq_result.stdout_lines
+
+    - name: Fail if prereq check did not succeed
+      fail:
+        msg: >
+          Prerequisite check failed on {{ inventory_hostname }}. See
+          {{ target_log_dir }}/opatch_prereq_{{ combo_patch }}_*.log
+      when:
+        - require_prereq_success
+        - prereq_result.rc != 0
+
+    - name: Apply the patch
+      command: >
+        {{ target_script_dir }}/opatch_apply.sh
+        {{ oh_alias }} {{ patch_stage }} {{ combo_patch }} {{ dbpsu_patch }}
+        {{ ojvm_patch }} {{ opatch_version }} {{ masterlog }} {{ target_log_dir }}
+      become: true
+      become_user: "{{ oracle_os_user }}"
+      environment:
+        EXPECTED_OS_USER: "{{ oracle_os_user }}"
+        ORACLE_PROFILE: "{{ oracle_profile }}"
+        ORAENV_PATH: "{{ oraenv_path }}"
+        ORATAB: "{{ oratab_path }}"
+        TARGET_DB_SIDS: "{{ target_db_sids | default([]) | join(' ') }}"
+        NOTIFY_ENABLED: "{{ notify_enabled | string | lower }}"
+        NOTIFY_EMAIL_TO: "{{ notify_email_to }}"
+        NOTIFY_EMAIL_FROM: "{{ notify_email_from }}"
+      register: apply_result
+      changed_when: true
+
+    - name: Show apply output
+      debug:
+        var: apply_result.stdout_lines
+
+    - name: Fail the play if apply did not succeed
+      fail:
+        msg: >
+          Patch apply failed on {{ inventory_hostname }}. See
+          {{ target_log_dir }}/opatch_apply_{{ combo_patch }}_*.log for
+          details before re-running.
+      when: apply_result.rc != 0
+
+  always:
+
+    - name: Remove staged OPatch zip
+      file:
+        path: "{{ patch_stage }}/{{ opatch_file }}"
+        state: absent
+
+    - name: Remove staged patch archive
+      file:
+        path: "{{ patch_stage }}/{{ patch_file }}"
+        state: absent
+
+    - name: Remove extracted patch staging directory
+      file:
+        path: "{{ patch_stage }}"
+        state: absent
+
+    - name: Remove prereq script from target
+      file:
+        path: "{{ target_script_dir }}/opatch_prereq.sh"
+        state: absent
+
+    - name: Remove apply script from target
+      file:
+        path: "{{ target_script_dir }}/opatch_apply.sh"
+        state: absent
+
+    - name: Log cleanup completion to masterlog
+      shell: >
+        echo "$(hostname | tr '[:lower:]' '[:upper:]'):CleanupPatchStage-{{ combo_patch }}:Date-$(date +'%m/%d/%Y-%H%M'):SUCCESS"
+        | tee -a {{ masterlog }}

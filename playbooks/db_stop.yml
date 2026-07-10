@@ -1,0 +1,9 @@
+---
+# playbooks/db_stop.yml
+# Usage:
+#   ansible-playbook playbooks/db_stop.yml -l prod_19c_apr2026
+- name: Stop all Oracle databases and the listener
+  hosts: all
+  gather_facts: true
+  roles:
+    - db_stop

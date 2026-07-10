@@ -1,0 +1,9 @@
+---
+# playbooks/db_patch.yml
+# Usage:
+#   ansible-playbook playbooks/db_patch.yml -l prod_19c_apr2026
+- name: Apply OPatch combo + OJVM patch to Oracle Home
+  hosts: all
+  gather_facts: true
+  roles:
+    - opatch_apply

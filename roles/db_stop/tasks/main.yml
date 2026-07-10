@@ -1,0 +1,48 @@
+---
+# roles/db_stop/tasks/main.yml
+# Stops every DB flagged Y in /etc/oratab, then stops the host's listener.
+
+- name: Ensure remote script directory exists
+  file:
+    path: "{{ target_script_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Ensure remote log directory exists
+  file:
+    path: "{{ target_log_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Copy db_stop.sh to target
+  copy:
+    src: db_stop.sh
+    dest: "{{ target_script_dir }}/db_stop.sh"
+    mode: "0755"
+
+- name: Run db_stop.sh (stop selected oratab DBs + optional listener)
+  command: "{{ target_script_dir }}/db_stop.sh {{ target_log_dir }}"
+  become: true
+  become_user: "{{ oracle_os_user }}"
+  environment:
+    EXPECTED_OS_USER: "{{ oracle_os_user }}"
+    ORACLE_PROFILE: "{{ oracle_profile }}"
+    ORAENV_PATH: "{{ oraenv_path }}"
+    ORATAB: "{{ oratab_path }}"
+    TARGET_DB_SIDS: "{{ target_db_sids | default([]) | join(' ') }}"
+    MANAGE_LISTENER: "{{ manage_listener | string | lower }}"
+    LISTENER_NAME: "{{ listener_name | default('') }}"
+  register: db_stop_result
+  changed_when: true
+
+- name: Show db_stop.sh output
+  debug:
+    var: db_stop_result.stdout_lines
+
+- name: Fail the play if any database failed to stop cleanly
+  fail:
+    msg: >
+      db_stop.sh reported at least one failure on {{ inventory_hostname }}.
+      Check {{ target_log_dir }}/status_of_all_db_stop_*.log before proceeding
+      to patching.
+  when: "'ERROR' in db_stop_result.stdout"

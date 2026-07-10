@@ -1,0 +1,58 @@
+---
+# inventory/group_vars/all.yml
+# This file contains all configuration values for Oracle patch automation.
+# Use only this one variables file for inventory-wide settings, Oracle Home
+# and patch profile values, and notification settings. Host-specific
+# overrides can still be placed in host_vars/<hostname>.yml when needed.
+
+# ---- Oracle runtime defaults on the *target* Oracle DB hosts ----
+oracle_os_user: oracle
+oracle_profile: ""
+oraenv_path: /usr/local/bin/oraenv
+oratab_path: /etc/oratab
+
+# Empty means "all DBs flagged Y in oratab". Set to a list to limit a
+# target host to specific SIDs:
+# target_db_sids:
+#   - CDBDEV
+#   - CDBQA
+target_db_sids: []
+
+# Listener handling. Empty listener_name means derive LISTENER_<short hostname>.
+manage_listener: true
+listener_name: ""
+
+# ---- Single work root on the *target* Oracle DB hosts ----
+oracle_work_dir: /opt/oracle/ansible_work
+
+target_script_dir: "{{ oracle_work_dir }}/scripts"
+target_log_dir: "{{ oracle_work_dir }}/logs"
+masterlog_dir: "{{ oracle_work_dir }}/masterlog"
+patch_stage: "{{ oracle_work_dir }}/patch_stage"
+backup_dir: "{{ oracle_work_dir }}/backups"
+
+# ---- Patch source location ----n# Where the patch/opatch zips live *on the control node* (or an NFS/HTTP
+# path Ansible can copy from). The role stages copies under patch_stage
+# on each target host and cleans them up afterward.
+patch_repo: /home/bala/ansible/oracle/patches/19c/2026-Apr
+
+# ---- Patch profile values ----
+oracle_base: /u01/app/oracle
+oracle_home: /u01/app/oracle/product/19.0.0/dbhome_1
+oracle_sid: cdbprd
+oh_alias: cdbprd
+patch_env_label: PROD_19C_APR2026
+opatch_version: 12.2.0.1.51
+combo_patch: 39062931
+dbpsu_patch: 39034528
+ojvm_patch: 38906621
+patch_file: p39062931_190000_Linux-x86-64.zip
+opatch_file: p6880880_190000_Linux-x86-64.zip
+masterlog: "{{ masterlog_dir }}/patch_{{ combo_patch }}_{{ patch_env_label }}_master.log"
+
+# ---- Notifications ----
+notify_enabled: true
+notify_email_to: "dba-team@example.com"
+notify_email_from: "ansible-oracle@example.com"
+
+# ---- Safety switches ----nrequire_prereq_success: true

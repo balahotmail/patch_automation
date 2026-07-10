@@ -1,0 +1,9 @@
+# Example inventory. Copy this file, rename it, and edit for your environment.
+# Group hosts by the Oracle Home / patch set they need, since patch numbers
+# and ORACLE_HOME differ per group. This lets you keep one group_vars file
+# per "patch profile" instead of hardcoding one global set of patch numbers.
+
+[oracle_db_hosts]
+# Add all Oracle hosts to this group when using a single variable file.
+proddb01 ansible_user=oracle
+proddb02 ansible_user=oracle

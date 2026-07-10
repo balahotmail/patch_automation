@@ -1,0 +1,3 @@
+---
+# Fallback values only; real values come from group_vars per patch profile.
+require_prereq_success: true
