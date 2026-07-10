@@ -65,6 +65,7 @@ oratab_path: /etc/oratab
 # Single target-side work folder. Scripts, logs, master logs, and patch
 # staging/backups are created below this path.
 oracle_work_dir: /opt/oracle/ansible_work
+backup_oracle_home: false  # Set to true to tar/gzip ORACLE_HOME before patching
 
 # Empty means all DBs flagged Y in oratab.
 target_db_sids: []

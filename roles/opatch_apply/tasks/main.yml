@@ -15,6 +15,34 @@
     - "{{ patch_stage }}"
     - "{{ backup_dir }}"
 
+- name: Back up Oracle Home to tarball
+  archive:
+    path: "{{ oracle_home }}"
+    dest: "{{ backup_dir }}/oracle_home_{{ oh_alias | default(inventory_hostname) }}_{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+    format: gz
+  become: true
+  become_user: "{{ oracle_os_user }}"
+  when:
+    - backup_oracle_home | bool
+    - oracle_stop_success | default(false)
+
+- name: Show Oracle Home backup archive path
+  debug:
+    msg: "Oracle Home backed up to {{ backup_dir }}/oracle_home_{{ oh_alias | default(inventory_hostname) }}_{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
+  when:
+    - backup_oracle_home | bool
+    - oracle_stop_success | default(false)
+
+- name: Fail if backup_oracle_home is enabled but Oracle stop validation is missing
+  fail:
+    msg: >
+      backup_oracle_home is enabled, but Oracle stop validation did not succeed
+      or was not performed. Run the db_stop playbook first and ensure shutdown
+      succeeded before patching.
+  when:
+    - backup_oracle_home | bool
+    - not oracle_stop_success | default(false)
+
 - name: Check which patches are already applied in this Oracle Home
   command: "{{ oracle_home }}/OPatch/opatch lspatches"
   become: true

@@ -39,6 +39,13 @@
   debug:
     var: db_stop_result.stdout_lines
 
+- name: Set validation fact after successful DB and listener stop
+  set_fact:
+    oracle_stop_success: true
+  when:
+    - db_stop_result.rc == 0
+    - "'ERROR' not in db_stop_result.stdout"
+
 - name: Fail the play if any database failed to stop cleanly
   fail:
     msg: >

@@ -31,6 +31,9 @@ masterlog_dir: "{{ oracle_work_dir }}/masterlog"
 patch_stage: "{{ oracle_work_dir }}/patch_stage"
 backup_dir: "{{ oracle_work_dir }}/backups"
 
+# Backup settings
+backup_oracle_home: false
+
 # ---- Patch source location ----n# Where the patch/opatch zips live *on the control node* (or an NFS/HTTP
 # path Ansible can copy from). The role stages copies under patch_stage
 # on each target host and cleans them up afterward.
