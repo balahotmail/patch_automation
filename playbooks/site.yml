@@ -1,6 +1,6 @@
 ---
 # playbooks/site.yml
-# Full maintenance-window sequence: stop DBs -> apply patch -> start listener.
+# Full maintenance-window sequence: stop DBs -> apply patch -> start DB services.
 # Runs one host at a time by default (serial: 1) so a failure on host 2
 # doesn't leave every host in the batch down simultaneously. Override with
 # -e patch_serial=<n> or -e patch_serial=100% if you've validated the

@@ -1,9 +1,5 @@
----
-# playbooks/listener_start.yml
-# Usage:
-#   ansible-playbook playbooks/listener_start.yml -l prod_19c_apr2026
 - name: Start the TNS listener
-  hosts: all
+  hosts: oracle_db_hosts
   gather_facts: true
   roles:
     - listener_start

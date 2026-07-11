@@ -2,7 +2,7 @@
 
 This project stages Oracle patch media, refreshes OPatch, runs OPatch
 prerequisite checks, applies DBPSU and OJVM patches, runs datapatch, and
-starts the listener again.
+starts the listener and database services again.
 
 The important rule: do not edit playbooks or shell scripts for each new
 environment. Put environment differences in inventory variables.
@@ -20,7 +20,6 @@ oracle_patching/
 |-- playbooks/
 |   |-- db_stop.yml
 |   |-- db_patch.yml
-|   |-- listener_start.yml
 |   `-- site.yml
 `-- roles/
     |-- db_stop/
@@ -127,7 +126,6 @@ Or run phases independently:
 ```bash
 ansible-playbook playbooks/db_stop.yml -l oracle_db_hosts
 ansible-playbook playbooks/db_patch.yml -l oracle_db_hosts
-ansible-playbook playbooks/listener_start.yml -l oracle_db_hosts
 ```
 
 You can patch more than one host at a time after testing:

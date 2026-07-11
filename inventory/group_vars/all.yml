@@ -20,10 +20,10 @@ target_db_sids: []
 
 # Listener handling. Empty listener_name means derive LISTENER_<short hostname>.
 manage_listener: true
-listener_name: ""
+listener_name: "LISTENER"
 
 # ---- Single work root on the *target* Oracle DB hosts ----
-oracle_work_dir: /opt/oracle/ansible_work
+oracle_work_dir: /backup/ansible_work
 
 target_script_dir: "{{ oracle_work_dir }}/scripts"
 target_log_dir: "{{ oracle_work_dir }}/logs"
@@ -32,7 +32,7 @@ patch_stage: "{{ oracle_work_dir }}/patch_stage"
 backup_dir: "{{ oracle_work_dir }}/backups"
 
 # Backup settings
-backup_oracle_home: false
+backup_oracle_home: true
 
 # ---- Patch source location ----n# Where the patch/opatch zips live *on the control node* (or an NFS/HTTP
 # path Ansible can copy from). The role stages copies under patch_stage

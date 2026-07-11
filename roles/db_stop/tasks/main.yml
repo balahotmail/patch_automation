@@ -20,7 +20,7 @@
     dest: "{{ target_script_dir }}/db_stop.sh"
     mode: "0755"
 
-- name: Run db_stop.sh (stop selected oratab DBs + optional listener)
+- name: Run db_stop.sh (stop selected oratab DBs + listener)
   command: "{{ target_script_dir }}/db_stop.sh {{ target_log_dir }}"
   become: true
   become_user: "{{ oracle_os_user }}"
@@ -28,6 +28,7 @@
     EXPECTED_OS_USER: "{{ oracle_os_user }}"
     ORACLE_PROFILE: "{{ oracle_profile }}"
     ORAENV_PATH: "{{ oraenv_path }}"
+    ORACLE_HOME: "{{ oracle_home }}"
     ORATAB: "{{ oratab_path }}"
     TARGET_DB_SIDS: "{{ target_db_sids | default([]) | join(' ') }}"
     MANAGE_LISTENER: "{{ manage_listener | string | lower }}"

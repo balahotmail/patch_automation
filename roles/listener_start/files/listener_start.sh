@@ -1,14 +1,8 @@
 #!/usr/bin/bash
 # ------------------------------------------------------
 # Name   : listener_start.sh
-# Purpose: Start the TNS listener if it is not already running.
+# Purpose: Start the listener only.
 # Notes  : Must run as the configured Oracle OS user.
-#
-# FIX vs. original tnsagent_start.sh: the original checked
-# `if ps -ef | grep tnslsnr` (listener IS running) and then tried to
-# START it in that branch, and did nothing when it was actually down.
-# That's backwards. This version starts it only when it's NOT running,
-# and is a no-op (with a log line) if it's already up.
 # ------------------------------------------------------
 
 set -u
@@ -20,45 +14,62 @@ if [ "$WHOAMI" != "$EXPECTED_OS_USER" ]; then
   exit 4
 fi
 
-# shellcheck source=/dev/null
 ORACLE_PROFILE="${ORACLE_PROFILE:-$HOME/.profile}"
 if [ -f "$ORACLE_PROFILE" ]; then
   . "$ORACLE_PROFILE"
 fi
 
-DATE1=$(date '+%d%b%Y_%H%M%S')
-LOGDIR="$1"
-LOGFILE="$LOGDIR/listener_start_$DATE1.log"
-HOSTNAME_UC=$(hostname -s | tr '[:lower:]' '[:upper:]')
-LISTENER_NAME="${LISTENER_NAME:-LISTENER_${HOSTNAME_UC}}"
+ORACLE_HOME="${ORACLE_HOME:-}"
+ORACLE_BASE="${ORACLE_BASE:-}"
+ORAENV_PATH="${ORAENV_PATH:-/usr/local/bin/oraenv}"
+ORATAB="${ORATAB:-/etc/oratab}"
+TARGET_DB_SIDS="${TARGET_DB_SIDS:-}"
+LISTENER_NAME="${LISTENER_NAME:-LISTENER}"
 MANAGE_LISTENER="${MANAGE_LISTENER:-true}"
 
-mkdir -p "$LOGDIR"
-
-{
-echo "=========================================="
-echo "Checking listener: $LISTENER_NAME"
-echo "=========================================="
-} >> "$LOGFILE"
-
-if [ "$MANAGE_LISTENER" != "true" ]; then
-    echo "Listener management disabled. Skipping listener start." >> "$LOGFILE"
-elif ps -ef | grep "[t]nslsnr.*${LISTENER_NAME}" > /dev/null; then
-    echo "Listener $LISTENER_NAME is already running. Nothing to do." >> "$LOGFILE"
+if [ -n "$ORACLE_HOME" ] && [ -x "$ORACLE_HOME/bin/sqlplus" ]; then
+  export ORACLE_HOME ORACLE_BASE
+  export PATH="$ORACLE_HOME/bin:$PATH"
 else
-    echo "Starting listener $LISTENER_NAME..." >> "$LOGFILE"
-    lsnrctl start "$LISTENER_NAME" >> "$LOGFILE"
-    if [ $? -eq 0 ]; then
-        echo "Listener started SUCCESSFULLY." >> "$LOGFILE"
-    else
-        echo "ERROR starting listener." >> "$LOGFILE"
-    fi
+  # Only source oraenv if ORACLE_SID is provided so oraenv can resolve ORACLE_HOME
+  if [ -n "${ORACLE_SID:-}" ]; then
+    ORAENV_ASK=NO
+    export ORAENV_ASK
+    # shellcheck source=/dev/null
+    . "$ORAENV_PATH"
+    export PATH="$ORACLE_HOME/bin:$PATH"
+  else
+    echo "ORACLE_HOME not provided and ORACLE_SID not set; skipping oraenv. ORACLE_HOME may be required for listener start." | tee -a "$LOGFILE"
+  fi
 fi
 
+LOGDIR="$1"
+mkdir -p "$LOGDIR"
+LOGFILE="$LOGDIR/listener_start_$(date '+%d%b%Y_%H%M%S').log"
+
 {
 echo "=========================================="
-echo "Script completed at $(date +"%Y%m%d_%H%M%S")"
+echo "Starting listener..."
 echo "=========================================="
-} >> "$LOGFILE"
+} > "$LOGFILE"
 
-cat "$LOGFILE"
+if [ "$MANAGE_LISTENER" = "true" ]; then
+  echo "Starting listener $LISTENER_NAME..." | tee -a "$LOGFILE"
+  LSNRCTL_BIN=""
+  if [ -n "${ORACLE_HOME:-}" ] && [ -x "$ORACLE_HOME/bin/lsnrctl" ]; then
+    LSNRCTL_BIN="$ORACLE_HOME/bin/lsnrctl"
+  elif command -v lsnrctl >/dev/null 2>&1; then
+    LSNRCTL_BIN="$(command -v lsnrctl)"
+  fi
+
+  if [ -n "$LSNRCTL_BIN" ]; then
+    "$LSNRCTL_BIN" start "$LISTENER_NAME" 2>&1 | tee -a "$LOGFILE"
+    if [ $? -eq 0 ]; then
+      echo "Listener started SUCCESSFULLY." | tee -a "$LOGFILE"
+    else
+      echo "ERROR starting listener. Check $LSNRCTL_BIN output." | tee -a "$LOGFILE"
+    fi
+  else
+    echo "WARNING: lsnrctl not found. Skipping listener start." | tee -a "$LOGFILE"
+  fi
+fi

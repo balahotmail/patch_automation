@@ -56,7 +56,7 @@ NOTIFY_EMAIL_FROM="${NOTIFY_EMAIL_FROM:-}"
 notify() {
   # notify "subject"  -- reads body from stdin
   local subject="$1"
-  if [ "$NOTIFY_ENABLED" = "true" ] && [ -n "$NOTIFY_EMAIL_TO" ]; then
+  if [ "$NOTIFY_ENABLED" = "true" ] && [ -n "$NOTIFY_EMAIL_TO" ] && command -v mailx >/dev/null 2>&1; then
     mailx -s "$subject" -r "$NOTIFY_EMAIL_FROM" "$NOTIFY_EMAIL_TO"
   else
     cat >/dev/null   # discard body so callers can always pipe into notify
@@ -65,16 +65,36 @@ notify() {
 
 mkdir -p "$LOGDIR"
 
-ORACLE_SID="$OH_ALIAS"
+PREREQ_TIMEOUT_SECONDS="${PREREQ_TIMEOUT_SECONDS:-1800}"
+run_opatch_prereq() {
+  local patch_dir="$1"
+  echo "Running OPatch prerequisite check for $patch_dir (timeout ${PREREQ_TIMEOUT_SECONDS}s)" | tee -a "$LOGFILE"
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$PREREQ_TIMEOUT_SECONDS" "$OPATCH" prereq CheckConflictAgainstOHWithDetail -ph "$patch_dir" >> "$LOGFILE" 2>&1
+  else
+    "$OPATCH" prereq CheckConflictAgainstOHWithDetail -ph "$patch_dir" >> "$LOGFILE" 2>&1
+  fi
+}
+
+ORACLE_SID="${ORACLE_SID:-$OH_ALIAS}"
 export ORACLE_SID
-ORAENV_ASK=NO
-export ORAENV_ASK
-# shellcheck source=/dev/null
 ORAENV_PATH="${ORAENV_PATH:-/usr/local/bin/oraenv}"
-. "$ORAENV_PATH"
+
+if [ -n "${ORACLE_HOME:-}" ] && [ -x "$ORACLE_HOME/OPatch/opatch" ]; then
+  export ORACLE_HOME
+  if [ -n "${ORACLE_BASE:-}" ]; then
+    export ORACLE_BASE
+  fi
+  export PATH="$ORACLE_HOME/bin:$ORACLE_HOME/OPatch:$PATH:/usr/ccs/bin"
+else
+  ORAENV_ASK=NO
+  export ORAENV_ASK
+  # shellcheck source=/dev/null
+  . "$ORAENV_PATH"
+  export PATH="$ORACLE_HOME/bin:$ORACLE_HOME/OPatch:$PATH:/usr/ccs/bin"
+fi
 
 HOST=$(hostname | tr '[:lower:]' '[:upper:]')
-export PATH="$PATH:/usr/ccs/bin"
 
 OPATCH="$ORACLE_HOME/OPatch/opatch"
 
@@ -99,9 +119,7 @@ fi
 echo "------ inventory details before patch -----" | tee -a "$LOGFILE"
 "$OPATCH" lspatches | tee -a "$LOGFILE"
 
-cd "${PATCHSTAGE}/${COMBOPATCH}/${DBPSUPATCH}" || exit 1
-"$OPATCH" prereq CheckConflictAgainstOHWithDetail -ph ./ >> "$LOGFILE"
-if [ $? -eq 0 ]; then
+if run_opatch_prereq "${PATCHSTAGE}/${COMBOPATCH}/${DBPSUPATCH}"; then
   echo "DBPSU prerequisite check completed successfully." | tee -a "$LOGFILE"
   echo "${HOST}:DBPSU-${DBPSUPATCH}-prerequisite-check:Date-$(date +'%m/%d/%Y-%H%M'):SUCCESS" | tee -a "$MASTERLOG"
 else
@@ -111,9 +129,7 @@ else
   exit 1
 fi
 
-cd "${PATCHSTAGE}/${COMBOPATCH}/${OJVMPATCH}" || exit 1
-"$OPATCH" prereq CheckConflictAgainstOHWithDetail -ph ./ >> "$LOGFILE"
-if [ $? -eq 0 ]; then
+if run_opatch_prereq "${PATCHSTAGE}/${COMBOPATCH}/${OJVMPATCH}"; then
   echo "OJVM prerequisite check completed successfully." | tee -a "$LOGFILE"
   echo "${HOST}:OJVM-${OJVMPATCH}-prerequisite:Date-$(date +'%m/%d/%Y-%H%M'):SUCCESS" | tee -a "$MASTERLOG"
 else

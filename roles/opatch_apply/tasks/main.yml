@@ -5,40 +5,37 @@
 # role can be re-run safely (e.g. after a partial failure).
 
 - name: Ensure remote working directories exist
-  file:
-    path: "{{ item }}"
-    state: directory
-    mode: "0755"
+  shell: >
+    mkdir -p "{{ item }}"
   loop:
     - "{{ target_script_dir }}"
     - "{{ masterlog_dir }}"
     - "{{ patch_stage }}"
     - "{{ backup_dir }}"
-
-- name: Back up Oracle Home to tarball
-  archive:
-    path: "{{ oracle_home }}"
-    dest: "{{ backup_dir }}/oracle_home_{{ oh_alias | default(inventory_hostname) }}_{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
-    format: gz
   become: true
   become_user: "{{ oracle_os_user }}"
-  when:
-    - backup_oracle_home | bool
-    - oracle_stop_success | default(false)
+
+- name: Back up Oracle Home to tarball
+  shell: >
+    tar -cf "{{ backup_dir }}/oracle_home_{{ oh_alias | default(inventory_hostname) }}_{{ ansible_date_time.iso8601_basic_short }}.tar"
+    -C "{{ oracle_home | dirname }}" "{{ oracle_home | basename }}"
+  become: true
+  become_user: "{{ oracle_os_user }}"
+  when: backup_oracle_home | bool
 
 - name: Show Oracle Home backup archive path
-  debug:
-    msg: "Oracle Home backed up to {{ backup_dir }}/oracle_home_{{ oh_alias | default(inventory_hostname) }}_{{ ansible_date_time.iso8601_basic_short }}.tar.gz"
-  when:
-    - backup_oracle_home | bool
-    - oracle_stop_success | default(false)
+  shell: >
+    echo "Oracle Home backed up to {{ backup_dir }}/oracle_home_{{ oh_alias | default(inventory_hostname) }}_{{ ansible_date_time.iso8601_basic_short }}.tar"
+  become: true
+  become_user: "{{ oracle_os_user }}"
+  when: backup_oracle_home | bool
 
 - name: Fail if backup_oracle_home is enabled but Oracle stop validation is missing
   fail:
     msg: >
-      backup_oracle_home is enabled, but Oracle stop validation did not succeed
-      or was not performed. Run the db_stop playbook first and ensure shutdown
-      succeeded before patching.
+      backup_oracle_home is mandatory before patching, but Oracle stop
+      validation was not found. Run the db_stop playbook first and ensure
+      shutdown succeeded before patching.
   when:
     - backup_oracle_home | bool
     - not oracle_stop_success | default(false)
@@ -72,41 +69,72 @@
         src: opatch_prereq.sh
         dest: "{{ target_script_dir }}/opatch_prereq.sh"
         mode: "0755"
+      become: true
+      become_user: "{{ oracle_os_user }}"
 
     - name: Copy patch-apply script to target
       copy:
         src: opatch_apply.sh
         dest: "{{ target_script_dir }}/opatch_apply.sh"
         mode: "0755"
+      become: true
+      become_user: "{{ oracle_os_user }}"
 
     - name: Copy patch archive from patch repo to target staging dir
       copy:
         src: "{{ patch_repo }}/{{ patch_file }}"
         dest: "{{ patch_stage }}/{{ patch_file }}"
         mode: "0644"
+      become: true
+      become_user: "{{ oracle_os_user }}"
 
     - name: Extract the patch archive
-      unarchive:
-        src: "{{ patch_stage }}/{{ patch_file }}"
-        dest: "{{ patch_stage }}"
-        remote_src: true
+      shell: >
+        case "{{ patch_stage }}/{{ patch_file }}" in
+          *.zip)
+            unzip -o "{{ patch_stage }}/{{ patch_file }}" -d "{{ patch_stage }}"
+            ;;
+          *.tar|*.tar.gz|*.tgz)
+            tar -xf "{{ patch_stage }}/{{ patch_file }}" -C "{{ patch_stage }}"
+            ;;
+          *)
+            echo "Unsupported patch archive format: {{ patch_file }}" >&2
+            exit 1
+            ;;
+        esac
+      become: true
+      become_user: "{{ oracle_os_user }}"
 
     - name: Copy OPatch utility archive to target staging dir
       copy:
         src: "{{ patch_repo }}/{{ opatch_file }}"
         dest: "{{ patch_stage }}/{{ opatch_file }}"
         mode: "0644"
+      become: true
+      become_user: "{{ oracle_os_user }}"
 
     - name: Back up existing OPatch directory
       shell: >
-        mv {{ oracle_home }}/OPatch
-        {{ backup_dir }}/OPatch_BKP_{{ ansible_date_time.iso8601_basic_short }} || true
+        mkdir -p "{{ backup_dir }}" &&
+        cp -a "{{ oracle_home }}/OPatch"
+        "{{ backup_dir }}/OPatch_BKP_{{ ansible_date_time.iso8601_basic_short }}" || true
 
     - name: Extract the new OPatch utility
-      unarchive:
-        src: "{{ patch_stage }}/{{ opatch_file }}"
-        dest: "{{ oracle_home }}/"
-        remote_src: true
+      shell: >
+        case "{{ patch_stage }}/{{ opatch_file }}" in
+          *.zip)
+            unzip -o "{{ patch_stage }}/{{ opatch_file }}" -d "{{ oracle_home }}/"
+            ;;
+          *.tar|*.tar.gz|*.tgz)
+            tar -xf "{{ patch_stage }}/{{ opatch_file }}" -C "{{ oracle_home }}/"
+            ;;
+          *)
+            echo "Unsupported OPatch archive format: {{ opatch_file }}" >&2
+            exit 1
+            ;;
+        esac
+      become: true
+      become_user: "{{ oracle_os_user }}"
 
     - name: Back up Oracle inventory
       shell: >
@@ -124,11 +152,16 @@
         EXPECTED_OS_USER: "{{ oracle_os_user }}"
         ORACLE_PROFILE: "{{ oracle_profile }}"
         ORAENV_PATH: "{{ oraenv_path }}"
+        ORACLE_HOME: "{{ oracle_home }}"
+        ORACLE_BASE: "{{ oracle_base }}"
+        ORACLE_SID: "{{ oh_alias }}"
         NOTIFY_ENABLED: "{{ notify_enabled | string | lower }}"
         NOTIFY_EMAIL_TO: "{{ notify_email_to }}"
         NOTIFY_EMAIL_FROM: "{{ notify_email_from }}"
       register: prereq_result
       changed_when: true
+      async: 7200
+      poll: 30
 
     - name: Show prereq output
       debug:
@@ -154,6 +187,9 @@
         EXPECTED_OS_USER: "{{ oracle_os_user }}"
         ORACLE_PROFILE: "{{ oracle_profile }}"
         ORAENV_PATH: "{{ oraenv_path }}"
+        ORACLE_HOME: "{{ oracle_home }}"
+        ORACLE_BASE: "{{ oracle_base }}"
+        ORACLE_SID: "{{ oh_alias }}"
         ORATAB: "{{ oratab_path }}"
         TARGET_DB_SIDS: "{{ target_db_sids | default([]) | join(' ') }}"
         NOTIFY_ENABLED: "{{ notify_enabled | string | lower }}"
@@ -161,6 +197,8 @@
         NOTIFY_EMAIL_FROM: "{{ notify_email_from }}"
       register: apply_result
       changed_when: true
+      async: 7200
+      poll: 30
 
     - name: Show apply output
       debug:
@@ -177,29 +215,34 @@
   always:
 
     - name: Remove staged OPatch zip
-      file:
-        path: "{{ patch_stage }}/{{ opatch_file }}"
-        state: absent
+      shell: >
+        rm -f "{{ patch_stage }}/{{ opatch_file }}"
+      become: true
+      become_user: "{{ oracle_os_user }}"
 
     - name: Remove staged patch archive
-      file:
-        path: "{{ patch_stage }}/{{ patch_file }}"
-        state: absent
+      shell: >
+        rm -f "{{ patch_stage }}/{{ patch_file }}"
+      become: true
+      become_user: "{{ oracle_os_user }}"
 
     - name: Remove extracted patch staging directory
-      file:
-        path: "{{ patch_stage }}"
-        state: absent
+      shell: >
+        rm -rf "{{ patch_stage }}"
+      become: true
+      become_user: "{{ oracle_os_user }}"
 
     - name: Remove prereq script from target
-      file:
-        path: "{{ target_script_dir }}/opatch_prereq.sh"
-        state: absent
+      shell: >
+        rm -f "{{ target_script_dir }}/opatch_prereq.sh"
+      become: true
+      become_user: "{{ oracle_os_user }}"
 
     - name: Remove apply script from target
-      file:
-        path: "{{ target_script_dir }}/opatch_apply.sh"
-        state: absent
+      shell: >
+        rm -f "{{ target_script_dir }}/opatch_apply.sh"
+      become: true
+      become_user: "{{ oracle_os_user }}"
 
     - name: Log cleanup completion to masterlog
       shell: >

@@ -1,24 +1,26 @@
 ---
 # roles/listener_start/tasks/main.yml
-# Starts the host's TNS listener back up after patching.
+# Starts the listener only after patching.
 
 - name: Ensure remote script directory exists
-  file:
-    path: "{{ target_script_dir }}"
-    state: directory
-    mode: "0755"
+  shell: >
+    mkdir -p "{{ target_script_dir }}"
+  become: true
+  become_user: "{{ oracle_os_user }}"
 
 - name: Ensure remote log directory exists
-  file:
-    path: "{{ target_log_dir }}"
-    state: directory
-    mode: "0755"
+  shell: >
+    mkdir -p "{{ target_log_dir }}"
+  become: true
+  become_user: "{{ oracle_os_user }}"
 
 - name: Copy listener_start.sh to target
   copy:
     src: listener_start.sh
     dest: "{{ target_script_dir }}/listener_start.sh"
     mode: "0755"
+  become: true
+  become_user: "{{ oracle_os_user }}"
 
 - name: Run listener_start.sh
   command: "{{ target_script_dir }}/listener_start.sh {{ target_log_dir }}"
@@ -27,18 +29,13 @@
   environment:
     EXPECTED_OS_USER: "{{ oracle_os_user }}"
     ORACLE_PROFILE: "{{ oracle_profile }}"
-    MANAGE_LISTENER: "{{ manage_listener | string | lower }}"
-    LISTENER_NAME: "{{ listener_name | default('') }}"
+    ORAENV_PATH: "{{ oraenv_path }}"
+    ORACLE_HOME: "{{ oracle_home }}"
+    ORACLE_BASE: "{{ oracle_base }}"
+    ORATAB: "{{ oratab_path }}"
   register: listener_start_result
   changed_when: true
 
 - name: Show listener_start.sh output
   debug:
     var: listener_start_result.stdout_lines
-
-- name: Fail the play if the listener did not come up
-  fail:
-    msg: >
-      Listener did not start successfully on {{ inventory_hostname }}.
-      Check {{ target_log_dir }}/listener_start_*.log.
-  when: "'ERROR' in listener_start_result.stdout"

@@ -54,24 +54,51 @@ NOTIFY_ENABLED="${NOTIFY_ENABLED:-true}"
 NOTIFY_EMAIL_TO="${NOTIFY_EMAIL_TO:-}"
 NOTIFY_EMAIL_FROM="${NOTIFY_EMAIL_FROM:-}"
 
+APPLY_TIMEOUT_SECONDS="${APPLY_TIMEOUT_SECONDS:-1800}"
+run_opatch_apply() {
+  local patch_dir="$1"
+  echo "Running OPatch apply for $patch_dir (timeout ${APPLY_TIMEOUT_SECONDS}s)" | tee -a "$LOGFILE"
+  if command -v timeout >/dev/null 2>&1; then
+    (
+      cd "$patch_dir" || exit 1
+      timeout "$APPLY_TIMEOUT_SECONDS" "$OPATCH" apply -silent
+    ) >> "$LOGFILE" 2>&1
+  else
+    (
+      cd "$patch_dir" || exit 1
+      "$OPATCH" apply -silent
+    ) >> "$LOGFILE" 2>&1
+  fi
+}
+
 notify() {
   local subject="$1"
-  if [ "$NOTIFY_ENABLED" = "true" ] && [ -n "$NOTIFY_EMAIL_TO" ]; then
+  if [ "$NOTIFY_ENABLED" = "true" ] && [ -n "$NOTIFY_EMAIL_TO" ] && command -v mailx >/dev/null 2>&1; then
     mailx -s "$subject" -r "$NOTIFY_EMAIL_FROM" "$NOTIFY_EMAIL_TO"
   else
     cat >/dev/null
   fi
 }
 
-ORACLE_SID="$OH_ALIAS"
+ORACLE_SID="${ORACLE_SID:-$OH_ALIAS}"
 export ORACLE_SID
-ORAENV_ASK=NO
-export ORAENV_ASK
-# shellcheck source=/dev/null
-. "$ORAENV_PATH"
+ORAENV_PATH="${ORAENV_PATH:-/usr/local/bin/oraenv}"
+
+if [ -n "${ORACLE_HOME:-}" ] && [ -x "$ORACLE_HOME/OPatch/opatch" ]; then
+  export ORACLE_HOME
+  if [ -n "${ORACLE_BASE:-}" ]; then
+    export ORACLE_BASE
+  fi
+  export PATH="$ORACLE_HOME/bin:$ORACLE_HOME/OPatch:$PATH:/usr/ccs/bin"
+else
+  ORAENV_ASK=NO
+  export ORAENV_ASK
+  # shellcheck source=/dev/null
+  . "$ORAENV_PATH"
+  export PATH="$ORACLE_HOME/bin:$ORACLE_HOME/OPatch:$PATH:/usr/ccs/bin"
+fi
 
 HOST=$(hostname | tr '[:lower:]' '[:upper:]')
-export PATH="$PATH:/usr/ccs/bin"
 OPATCH="$ORACLE_HOME/OPatch/opatch"
 
 {
@@ -93,8 +120,12 @@ echo "------ inventory details before patch -----" | tee -a "$LOGFILE"
 "$OPATCH" lspatches | tee -a "$LOGFILE"
 
 # ---- DBPSU / combo patch ----
-cd "${PATCHSTAGE}/${COMBOPATCH}/${DBPSUPATCH}" || exit 1
-"$OPATCH" apply -silent | tee -a "$LOGFILE"
+if ! run_opatch_apply "${PATCHSTAGE}/${COMBOPATCH}/${DBPSUPATCH}"; then
+  echo "DBPSU patch $DBPSUPATCH installation FAILED." | tee -a "$LOGFILE"
+  echo "" | notify "${HOST} : DBPSU patch apply failed"
+  echo "${HOST}:DBPSUpatch-${DBPSUPATCH}-install:Date-$(date +'%m/%d/%Y-%H%M'):FAILED" | tee -a "$MASTERLOG"
+  exit 1
+fi
 
 CHECKDBPSUPATCH=$("$OPATCH" lspatches | grep "$DBPSUPATCH" | cut -d ';' -f1)
 if [ "$CHECKDBPSUPATCH" = "$DBPSUPATCH" ]; then
@@ -108,8 +139,12 @@ else
 fi
 
 # ---- OJVM patch ----
-cd "${PATCHSTAGE}/${COMBOPATCH}/${OJVMPATCH}" || exit 1
-"$OPATCH" apply -silent | tee -a "$LOGFILE"
+if ! run_opatch_apply "${PATCHSTAGE}/${COMBOPATCH}/${OJVMPATCH}"; then
+  echo "OJVM patch $OJVMPATCH installation FAILED." | tee -a "$LOGFILE"
+  echo "" | notify "${HOST} : OJVM patch apply failed"
+  echo "${HOST}:OJVMpatch-${OJVMPATCH}-install:Date-$(date +'%m/%d/%Y-%H%M'):FAILED" | tee -a "$MASTERLOG"
+  exit 1
+fi
 
 CHECKOJVMPATCH=$("$OPATCH" lspatches | grep "$OJVMPATCH" | cut -d ';' -f1)
 if [ "$CHECKOJVMPATCH" = "$OJVMPATCH" ]; then
@@ -195,8 +230,8 @@ EOF
   echo "status_output1: $status_output1" | tee -a "$LOGFILE"
   echo "status_output2: $status_output2" | tee -a "$LOGFILE"
 
-  DBPATCH1=$(echo "$status_output1" | grep "$DBPSUPATCH" | grep SUCCESS | cut -d ' ' -f1)
-  DBPATCH2=$(echo "$status_output2" | grep "$OJVMPATCH" | grep SUCCESS | cut -d ' ' -f1)
+  DBPATCH1=$(echo "$status_output1" | awk '{for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {print $i; exit}}' | head -n 1)
+  DBPATCH2=$(echo "$status_output2" | awk '{for (i=1;i<=NF;i++) if ($i ~ /^[0-9]+$/) {print $i; exit}}' | head -n 1)
 
   if [ "$DBPATCH1" = "$DBPSUPATCH" ]; then
     echo "DBPSU patch $DBPSUPATCH confirmed applied in DB $DBNAME." | tee -a "$LOGFILE"
